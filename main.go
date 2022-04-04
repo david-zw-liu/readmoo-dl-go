@@ -18,6 +18,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"sort"
 	"strings"
 
 	utils "github.com/david-liu-950627/readmoo-dl-go/utils"
@@ -99,6 +100,15 @@ type DeviceReqBody struct {
 	} `json:"data"`
 }
 
+type LibrayItem struct {
+	Type       string `json:"type"`
+	ID         string `json:"id"`
+	Attributes struct {
+		Title    string `json:"title"`
+		Subtitle string `json:"subtitle"`
+	}
+}
+
 func main() {
 	// load configurations
 	config := loadOrCreateConfig()
@@ -108,8 +118,47 @@ func main() {
 		registerDevice(config)
 	}
 
-	// downloadBook("210102339000101", config)
+	libraryItem := pickBook(config)
+	downloadLibraryItem(libraryItem, config)
 	storeConfig(config)
+}
+
+func pickBook(config *Config) *LibrayItem {
+	apiURL := "https://api.readmoo.com/store/v3/me/library_items?page[count]=500"
+	headers := map[string]string{"Content-Type": "application/vnd.api+json"}
+	jsonBytes, err := get(apiURL, headers, config)
+	handleError(err)
+
+	var objmap map[string]json.RawMessage
+	err = json.Unmarshal(jsonBytes, &objmap)
+	handleError(err)
+
+	var allLibraryItems []LibrayItem
+	err = json.Unmarshal(objmap["included"], &allLibraryItems)
+	handleError(err)
+
+	bookOptions := []string{}
+	libraryItemsOfBooks := map[string]LibrayItem{}
+	for _, libraryItem := range allLibraryItems {
+		if libraryItem.Type == "books" {
+			bookName := buildBookName(&libraryItem)
+			bookOptions = append(bookOptions, bookName)
+			libraryItemsOfBooks[bookName] = libraryItem
+		}
+	}
+	sort.Slice(bookOptions, func(i, j int) bool {
+		libraryItem1, _ := libraryItemsOfBooks[bookOptions[i]]
+		libraryItem2, _ := libraryItemsOfBooks[bookOptions[j]]
+
+		return libraryItem1.Attributes.Title < libraryItem2.Attributes.Title
+	})
+	_, result, _ := (&promptui.Select{
+		Label: "Select a book",
+		Items: bookOptions,
+	}).Run()
+	selectedBook, _ := libraryItemsOfBooks[result]
+
+	return &selectedBook
 }
 
 func fetchUserId(config *Config) {
@@ -201,13 +250,13 @@ func storeConfig(config *Config) {
 	os.WriteFile("config.json", configJson, 0644)
 }
 
-func downloadBook(bookId string, config *Config) {
-	workdir := fmt.Sprintf("tmp/%s/", bookId)
+func downloadLibraryItem(libraryItem *LibrayItem, config *Config) {
+	workdir := fmt.Sprintf("tmp/%s/", libraryItem.ID)
 	os.Mkdir(workdir, 0755)
 
 	// Fetch the license doucment of book
 	fmt.Print("Fetching the license document... ")
-	lcpl := loadLCPL(bookId, config)
+	lcpl := loadLCPL(libraryItem.ID, config)
 	contentKey := getContentKey(lcpl, config.PrivateKey)
 	fmt.Println("Done.")
 
@@ -231,7 +280,7 @@ func downloadBook(bookId string, config *Config) {
 	os.Remove(encryptionXMLPath)
 	fmt.Println("Done.")
 
-	outputFilePath := fmt.Sprintf("outputs/%s.epub", bookId)
+	outputFilePath := fmt.Sprintf("outputs/%s.epub", buildBookName(libraryItem))
 	fmt.Printf("Outputing the book epub file to %s... ", outputFilePath)
 	utils.ZipSource(uncompressedPath, outputFilePath)
 	fmt.Println("Done.")
@@ -404,6 +453,17 @@ func get(url string, headers map[string]string, config *Config) ([]byte, error) 
 	buffer.ReadFrom(resp.Body)
 
 	return buffer.Bytes(), nil
+}
+
+func buildBookName(libraryItem *LibrayItem) string {
+	var filenameParts []string
+	filenameParts = append(filenameParts, libraryItem.ID)
+	filenameParts = append(filenameParts, libraryItem.Attributes.Title)
+	if libraryItem.Attributes.Subtitle != "" {
+		filenameParts = append(filenameParts, libraryItem.Attributes.Subtitle)
+	}
+
+	return strings.Join(filenameParts, "-")
 }
 
 func handleError(err error) {
