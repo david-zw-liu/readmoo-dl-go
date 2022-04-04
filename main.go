@@ -5,6 +5,7 @@ import (
 	"compress/flate"
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/base64"
@@ -16,8 +17,10 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 
 	utils "github.com/david-liu-950627/readmoo-dl-go/utils"
+	"github.com/google/uuid"
 )
 
 // Licensed Content Protection LicenseDocument
@@ -208,7 +211,25 @@ func loadOrCreateConfig() *Config {
 
 		return &config
 	} else if errors.Is(err, os.ErrNotExist) {
-		handleError(errors.New("Not implement if config.json is missing"))
+		reader := rand.Reader
+		bitSize := 2048
+		privateKey, err := rsa.GenerateKey(reader, bitSize)
+		handleError(err)
+
+		privateKeyBlock := &pem.Block{
+			Type:  "PRIVATE KEY",
+			Bytes: x509.MarshalPKCS1PrivateKey(privateKey),
+		}
+		publicKeyBlock := &pem.Block{
+			Type:  "PUBLIC KEY",
+			Bytes: x509.MarshalPKCS1PublicKey(&privateKey.PublicKey),
+		}
+
+		config.PrivateKey = privateKey
+		config.PrivateKeyStr = string(pem.EncodeToMemory(privateKeyBlock))
+		config.PublicKeyStr = string(pem.EncodeToMemory(publicKeyBlock))
+		config.UDID = strings.ToUpper(uuid.New().String())
+		return &config
 	} else {
 		handleError(err)
 	}
