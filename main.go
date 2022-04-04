@@ -16,11 +16,13 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 
 	utils "github.com/david-liu-950627/readmoo-dl-go/utils"
 	"github.com/google/uuid"
+	"github.com/manifoldco/promptui"
 )
 
 // Licensed Content Protection LicenseDocument
@@ -41,6 +43,7 @@ type LicenseDocument struct {
 }
 
 type Config struct {
+	UserId        string          `json:"userId"`
 	AccessToken   string          `json:"accessToken"`
 	UDID          string          `json:"udid"`
 	PrivateKeyStr string          `json:"privateKey"`
@@ -65,11 +68,131 @@ type Encryption struct {
 	} `xml:"EncryptedData"`
 }
 
+type LoginResp struct {
+	AccessToken      string `json:"access_token"`
+	TokenType        string `json:"token_type"`
+	Error            int    `json:"error"`
+	ErrorDescription string `json:"error_description"`
+}
+
+type MeResp struct {
+	Data struct {
+		ID string `json:"id"`
+	} `json:"data"`
+}
+
+type DeviceReqBody struct {
+	Data struct {
+		Type       string `json:"type"`
+		ID         string `json:"id"`
+		Attributes struct {
+			Info      string `json:"info"`
+			UserAgent string `json:"user_agent"`
+			Name      string `json:"name"`
+			Key       struct {
+				Name      string `json:"name"`
+				Value     string `json:"value"`
+				Algorithm string `json:"algorithm"`
+			} `json:"key"`
+			DeviceType string `json:"device_type"`
+		} `json:"attributes"`
+	} `json:"data"`
+}
+
 func main() {
 	// load configurations
 	config := loadOrCreateConfig()
+	if config.AccessToken == "" {
+		LoginUser(config)
+		fetchUserId(config)
+		registerDevice(config)
+	}
+
 	// downloadBook("210102339000101", config)
 	storeConfig(config)
+}
+
+func fetchUserId(config *Config) {
+	apiURL := "https://api.readmoo.com/store/v3/me"
+	headers := map[string]string{"Content-Type": "application/vnd.api+json"}
+	jsonBytes, err := get(apiURL, headers, config)
+	handleError(err)
+
+	var me MeResp
+	json.NewDecoder(bytes.NewBuffer(jsonBytes)).Decode(&me)
+	config.UserId = me.Data.ID
+}
+
+func registerDevice(config *Config) {
+	deviceReqBody := &DeviceReqBody{}
+	deviceReqBody.Data.Type = "devices"
+	deviceReqBody.Data.ID = config.UDID
+	deviceReqBody.Data.Attributes.Info = "iPhone 13 Pro"
+	deviceReqBody.Data.Attributes.UserAgent =
+		fmt.Sprintf("Device UDID=%s; OS=15.4.1; Model=phone; System=iOS; Ver=6.2.1; Build=271", config.UDID)
+	deviceReqBody.Data.Attributes.Name = "iPhone 13 Pro"
+	deviceReqBody.Data.Attributes.Key.Name = config.UserId
+	publicKeyLines := strings.Split(config.PublicKeyStr, "\n")
+	publicKeyLines = publicKeyLines[1 : len(publicKeyLines)-1]
+	deviceReqBody.Data.Attributes.Key.Value = strings.Join(publicKeyLines, "")
+	deviceReqBody.Data.Attributes.Key.Algorithm = "http://www.w3.org/2001/04/xmlenc#rsa-1_5"
+	deviceReqBody.Data.Attributes.DeviceType = "phone"
+
+	json, _ := json.Marshal(deviceReqBody)
+	hc := http.Client{}
+	apiURL := fmt.Sprintf("https://api.readmoo.com/store/v3/me/devices/%s", config.UDID)
+	req, err := http.NewRequest("PATCH", apiURL, bytes.NewBuffer(json))
+	req.Header.Set("User-Agent", "Readmoo/271 CFNetwork/1331.0.7 Darwin/21.4.0")
+	req.Header.Add("Content-Type", "application/vnd.api+json")
+	req.Header.Add("Authorization", fmt.Sprintf("Bearer %s", config.AccessToken))
+	resp, err := hc.Do(req)
+	handleError(err)
+
+	if int(resp.StatusCode/100) != 2 {
+		handleError(errors.New(fmt.Sprintf("Unexpected response status code: %v", resp.StatusCode)))
+	}
+	defer resp.Body.Close()
+}
+
+func LoginUser(config *Config) {
+	username, _ := (&promptui.Prompt{
+		Label: "Username",
+	}).Run()
+	password, _ := (&promptui.Prompt{
+		Label: "Password",
+		Mask:  '*',
+	}).Run()
+
+	hc := http.Client{}
+
+	// build form
+	form := url.Values{}
+	form.Add("grant_type", "password")
+	form.Add("udid", config.UDID)
+	form.Add("username", username)
+	form.Add("password", password)
+	form.Add("scope", "reading highlight like comment me library")
+
+	// new request
+	api_url := "https://member.readmoo.com/oauth/access_token"
+	req, err := http.NewRequest("POST", api_url, strings.NewReader(form.Encode()))
+	handleError(err)
+	req.Header.Set("User-Agent", "Readmoo/271 CFNetwork/1331.0.7 Darwin/21.4.0")
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Authorization", "Basic ZDlhZWYxZWM5MjlkYTY2MmU5MmUzNDQzNDgyNWJjNWM6Nzc0N2JjZWExYWIxMzRkMTY3NGFlZTVlZDNiOGMyYzI=")
+
+	// perform requst
+	resp, err := hc.Do(req)
+	handleError(err)
+	if int(resp.StatusCode/100) != 2 {
+		handleError(errors.New(fmt.Sprintf("Unexpected response status code: %v", resp.StatusCode)))
+	}
+	defer resp.Body.Close()
+
+	var loginResp LoginResp
+	json.NewDecoder(resp.Body).Decode(&loginResp)
+
+	config.AccessToken = loginResp.AccessToken
 }
 
 func storeConfig(config *Config) {
