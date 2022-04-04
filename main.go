@@ -152,10 +152,11 @@ func pickBook(config *Config) *LibrayItem {
 
 		return libraryItem1.Attributes.Title < libraryItem2.Attributes.Title
 	})
-	_, result, _ := (&promptui.Select{
+	_, result, err := (&promptui.Select{
 		Label: "Select a book",
 		Items: bookOptions,
 	}).Run()
+	handleError(err)
 	selectedBook, _ := libraryItemsOfBooks[result]
 
 	return &selectedBook
