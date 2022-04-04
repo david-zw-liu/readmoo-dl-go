@@ -38,11 +38,11 @@ type LicenseDocument struct {
 }
 
 type Config struct {
-	AccessToken   string `json:"accessToken"`
-	UDID          string `json:"udid"`
-	PrivateKeyStr string `json:"privateKey"`
-	PrivateKey    *rsa.PrivateKey
-	PublicKeyStr  string `json:"publicKey"`
+	AccessToken   string          `json:"accessToken"`
+	UDID          string          `json:"udid"`
+	PrivateKeyStr string          `json:"privateKey"`
+	PrivateKey    *rsa.PrivateKey `json:"-"`
+	PublicKeyStr  string          `json:"publicKey"`
 }
 
 type Encryption struct {
@@ -65,7 +65,14 @@ type Encryption struct {
 func main() {
 	// load configurations
 	config := loadOrCreateConfig()
-	downloadBook("210102339000101", config)
+	// downloadBook("210102339000101", config)
+	storeConfig(config)
+}
+
+func storeConfig(config *Config) {
+	configJson, err := json.MarshalIndent(config, "", "\t")
+	handleError(err)
+	os.WriteFile("config.json", configJson, 0644)
 }
 
 func downloadBook(bookId string, config *Config) {
