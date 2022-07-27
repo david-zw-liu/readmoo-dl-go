@@ -229,7 +229,7 @@ func LoginUser(config *Config) {
 	handleError(err)
 	req.Header.Set("User-Agent", "Readmoo/271 CFNetwork/1331.0.7 Darwin/21.4.0")
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("Authorization", "Basic ZDlhZWYxZWM5MjlkYTY2MmU5MmUzNDQzNDgyNWJjNWM6Nzc0N2JjZWExYWIxMzRkMTY3NGFlZTVlZDNiOGMyYzI=")
+	req.Header.Set("Authorization", "Basic YjgxMDA1NDA3YWM2YWY0MmRmZjY4YzRiNDkyZTA3MWQ6Y2M3MWE4NGU0ZWIwMmU2YjI2MWM0MDAyODYzYTIwZjg=")
 
 	// perform requst
 	resp, err := hc.Do(req)
